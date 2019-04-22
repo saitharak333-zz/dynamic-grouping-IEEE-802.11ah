@@ -1,6 +1,32 @@
 import random
 import time
 import threading
+# Reading the excel file
+import pandas as pd
+df = pd.read_excel('dataset.xlsx')
+df_norm = (df - df.mean())/(df.max() - df.min())
+# Mean values of dataset
+stationMean = 265
+slotsMean = 25.642857
+BeaconIntervalMean = 121192.087912
+ThroughputMean = 0.278645
+# max - min of Dataset
+stationMaxmin = 470
+slotsMaxmin = 49
+BeaconIntervalMaxmin = 163840
+ThroughputMaxmin = 0.264033
+# Dataset for no of slots
+slots_x = df_norm[['No of Stations', 'Beacon Interval', 'Throughput']]
+slots_y = df_norm[['No of Slots']]
+# Dataset for Throughput
+th_x = df_norm[['No of Stations', 'Beacon Interval', 'No of Slots']]
+th_y = df_norm[['Throughput']]
+# Regression models
+from sklearn.tree import DecisionTreeRegressor
+reg_slots = DecisionTreeRegressor(max_depth = 7)
+reg_th = DecisionTreeRegressor(max_depth = 20)
+reg_slots.fit(slots_x, slots_y)
+reg_th.fit(th_x, th_y)
 
 # Threading function call for each station
 def mac(lock, station_id, slottime):
@@ -88,10 +114,10 @@ rawslot = int(input("Enter intial no of raw slots: "))
 slotspergrp = [rawslot for i in range(nogrp)]
 
 # Only for the first time
-# Itereating through all the groups and setting stations prer slot and slot time
+# Itereating through all the groups and setting stations per slot and slot time
 lock = threading.Lock()     #  Used for locking the channel
 
-start = time.time()
+# running the threads with the initial parameters
 for i in range(nogrp):
     # Stations present in each slot
     slotsta = [[] for j in range(slotspergrp[i])]
@@ -101,11 +127,147 @@ for i in range(nogrp):
     slottime = [float(grpdur[i]/slotspergrp[i]) for j in range(slotspergrp[i])]
     # Iterating in each RAW slot
     for j in range(slotspergrp[i]):
+        # running stations in a slot no. of threads parallelly
         for k in slotsta[j]:
             stationthreads = threading.Thread(target = mac, name = str(i), args=(lock, k, slottime[j],))
             stationthreads.start()
         else:
+            # to resume execution of main function after last thread is completed
             stationthreads.join()
 
-print(pktrec)
-print(time.time() - start)
+
+# carrying out hierarchical clustering
+while True:
+    # initialisation for first stage of hierarchical clustering
+    grpsta = [[i] for i in range(N)]
+    mpktrec = [x for x in pktrec]
+    invpacketrec = [float(1/x) for x in mpktrec]
+    criterion = [float(x/sum(invpacketrec)) for x in invpacketrec]
+    grpdur = [(beaconinterval * x) for x in criterion]
+    slotspergrp = [1 for i in range(len(grpsta))]
+    throughoverall = 0
+    #predicting the overall throughput of the first stage
+    for i in range(len(grpsta)):
+        # normalising the values so that they can be fed to the regressor
+        station_norm = ((len(grpsta[i]) - stationMean)/stationMaxmin)
+        beaconinterval_norm = ((grpdur[i] - BeaconIntervalMean)/BeaconIntervalMaxmin)
+        # creating a dataframe inorder to predict the no.of slots from no.of stations,beacon interval and throughput
+        data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'Throughput':[((0.5 - ThroughputMean)/ThroughputMaxmin)]}
+        slots_norm = reg_slots.predict(ip_data)
+        ip_data = pd.DataFrame(data)
+        slotspergrp[i] = min(int((slots_norm * slotsMaxmin) + slotsMean), len(grpsta[i]))
+        slots_norm = (slotspergrp[i] - stationMean)/stationMaxmin)
+        # creating a dataframe inorder to predict the throughput from no.of stations,beacon interval and no.of slots
+        data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'No of Slots':[slots_norm]}
+        ip_data = pd.DataFrame(data)
+        th_norm = reg_th.predict(ip_data)
+        th = (th_norm * ThroughputMaxmin) + ThroughputMean
+        throughoverall += th * grpdur[i]
+    else:
+        finalthroughput = throughoverall/beaconinterval
+        finalgrpsta = [x for x in grpsta]
+        finalgrpdur = [x for x in grpdur]
+        finalslotspergrp = [x for x in slotspergrp]
+        # grouping till we group all the stations into one group
+    while len(grpsta) != 1:
+        dic = {}
+        # creating a dictionary with same no.of packets received into one list
+        for i in range(len(grpsta)):
+            try:
+                if len(dic[mpktrec[i]]):
+                    dic[mpktrec[i]].append(i)
+            except:
+                dic[mpktrec[i]] = [i]
+        else:
+            # sorting the array in order of increasing packets received
+            mpktrec_sorted = sorted(mpktrec)
+            # finding minimum difference between the packets received and the corresponding indices
+            min_diff = mpktrec_sorted[-1] - mpktrec_sorted[0]
+            index = 0
+            for i in range(len(mpktrec_sorted)-1):
+                if min_diff > mpktrec_sorted[i + 1] - mpktrec_sorted[i]:
+                    min_diff = mpktrec_sorted[i + 1] - mpktrec_sorted[i]
+                    index = i
+                if min_diff == 0:
+                    break
+        # Finding the first and second list of groups to be grouped further
+        if len(dic[mpktrec_sorted[index]]) != 1:
+            first = dic[mpktrec_sorted[index]][0]
+            second = dic[mpktrec_sorted[index]][1]
+        else:
+            first = dic[mpktrec_sorted[index]]
+            second = dic[mpktrec_sorted[index + 1]]
+        fir_grp = grpsta[first]
+        sec_grp = grpsta[second]
+        fir_grp_mpktrec = mpktrec[first]
+        sec_grp_mpktrec = mpktrec[second]
+        # removing the two groups from the grpsta array
+        grpsta.remove(fir_grp)
+        grpsta.remove(sec_grp)
+        mpktrec.remove(fir_grp_mpktrec)
+        mpktrec.remove(sec_grp_mpktrec)
+        finalgrp = fir_grp + sec_grp
+        # finding the final packet recieved by taking a weighted average
+        finalgrp_mpktrec = ((len(fir_grp) * fir_grp_mpktrec) + (len(sec_grp) * sec_grp_mpktrec))/(len(fir_grp) + len(sec_grp))
+        # appending the new grp formed
+        grpsta.append(finalgrp)
+        mpktrec.append(finalgrp_mpktrec)
+
+        invpacketrec = [float(1/x) for x in mpktrec]
+        criterion = [float(x/sum(invpacketrec)) for x in invpacketrec]
+        grpdur = [(beaconinterval * x) for x in criterion]
+        slotspergrp = [1 for i in range(len(grpsta))]
+        throughoverall = 0
+
+        for i in range(len(grpsta)):
+            # normalising the values so that they can be fed to the regressor
+            station_norm = ((len(grpsta[i]) - stationMean)/stationMaxmin)
+            beaconinterval_norm = ((grpdur[i] - BeaconIntervalMean)/BeaconIntervalMaxmin)
+            # creating a dataframe inorder to predict the no.of slots from stations,beacon interval and throughput
+            data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'Throughput':[((0.5 - ThroughputMean)/ThroughputMaxmin)]}
+            slots_norm = reg_slots.predict(ip_data)
+            ip_data = pd.DataFrame(data)
+            slotspergrp[i] = min(int((slots_norm * slotsMaxmin) + slotsMean), len(grpsta[i]))
+            slots_norm = (slotspergrp[i] - stationMean)/stationMaxmin)
+            # creating a dataframe inorder to predict the throughput from stations,beacon interval and no.of slots
+            data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'No of Slots':[slots_norm]}
+            ip_data = pd.DataFrame(data)
+            th_norm = reg_th.predict(ip_data)
+            th = (th_norm * ThroughputMaxmin) + ThroughputMean
+            throughoverall += th * grpdur[i]
+        else:
+            if finalthroughput < throughoverall/beaconinterval:
+                finalthroughput = throughoverall/beaconinterval
+                finalgrpdur = [x for x in grpdur]
+                finalgrpsta = [x for x in grpsta]
+                finalslotspergrp = [x for x in slotspergrp]
+
+    # running the threads with the updated parameters
+    grpsta = [x for x in finalgrpsta]
+    grpdur = [x for x in finalgrpdur]
+    slotspergrp = [x for x in finalslotspergrp]
+    for i in range(len(grpsta)):
+        # Stations present in each slot
+        slotsta = [[] for j in range(slotspergrp[i])]
+        for j in range(len(grpsta[i])):
+            slotsta[j % slotspergrp[i]].append(grpsta[i][j])
+        # Time duration of each raw slot
+        pktslot = []
+        for j in range(slotspergrp[i]):
+            prec = 0
+            for k in slotsta[j]:
+                prec += pktrec[k]
+            else:
+                pktslot.append(prec)
+        else:
+            invpktslot = [float(1/x) for x in pktslot]
+            slottime = [float((grpdur[i] * x)/sum(invpktslot)) for x in invpktslot]
+        # Iterating in each RAW slot
+        for j in range(slotspergrp[i]):
+            # running stations in a slot no. of threads parallelly
+            for k in slotsta[j]:
+                stationthreads = threading.Thread(target = mac, name = str(i), args=(lock, k, slottime[j],))
+                stationthreads.start()
+            else:
+                # to resume execution of main function after last thread is completed
+                stationthreads.join()
