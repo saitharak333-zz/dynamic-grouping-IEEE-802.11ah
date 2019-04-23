@@ -135,12 +135,14 @@ for i in range(nogrp):
             # to resume execution of main function after last thread is completed
             stationthreads.join()
 
+print(pktrec)
+notimes = 3
 
 # carrying out hierarchical clustering
-while True:
+while notimes > 0:
     # initialisation for first stage of hierarchical clustering
     grpsta = [[i] for i in range(N)]
-    mpktrec = [x for x in pktrec]
+    mpktrec = [x+1 if x == 0 else x for x in pktrec]
     invpacketrec = [float(1/x) for x in mpktrec]
     criterion = [float(x/sum(invpacketrec)) for x in invpacketrec]
     grpdur = [(beaconinterval * x) for x in criterion]
@@ -151,12 +153,8 @@ while True:
         # normalising the values so that they can be fed to the regressor
         station_norm = ((len(grpsta[i]) - stationMean)/stationMaxmin)
         beaconinterval_norm = ((grpdur[i] - BeaconIntervalMean)/BeaconIntervalMaxmin)
-        # creating a dataframe inorder to predict the no.of slots from no.of stations,beacon interval and throughput
-        data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'Throughput':[((0.5 - ThroughputMean)/ThroughputMaxmin)]}
-        slots_norm = reg_slots.predict(ip_data)
-        ip_data = pd.DataFrame(data)
-        slotspergrp[i] = min(int((slots_norm * slotsMaxmin) + slotsMean), len(grpsta[i]))
-        slots_norm = (slotspergrp[i] - stationMean)/stationMaxmin)
+        slotspergrp[i] = 1
+        slots_norm = ((slotspergrp[i] - slotsMean)/slotsMaxmin)
         # creating a dataframe inorder to predict the throughput from no.of stations,beacon interval and no.of slots
         data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'No of Slots':[slots_norm]}
         ip_data = pd.DataFrame(data)
@@ -195,8 +193,9 @@ while True:
             first = dic[mpktrec_sorted[index]][0]
             second = dic[mpktrec_sorted[index]][1]
         else:
-            first = dic[mpktrec_sorted[index]]
-            second = dic[mpktrec_sorted[index + 1]]
+            first = dic[mpktrec_sorted[index]][0]
+            second = dic[mpktrec_sorted[index + 1]][0]
+            # print(first, second)
         fir_grp = grpsta[first]
         sec_grp = grpsta[second]
         fir_grp_mpktrec = mpktrec[first]
@@ -228,7 +227,9 @@ while True:
             slots_norm = reg_slots.predict(ip_data)
             ip_data = pd.DataFrame(data)
             slotspergrp[i] = min(int((slots_norm * slotsMaxmin) + slotsMean), len(grpsta[i]))
-            slots_norm = (slotspergrp[i] - stationMean)/stationMaxmin)
+            if slotspergrp[i] == 0:
+                slotspergrp[i] = 1
+            slots_norm = ((slotspergrp[i] - slotsMean)/slotsMaxmin)
             # creating a dataframe inorder to predict the throughput from stations,beacon interval and no.of slots
             data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'No of Slots':[slots_norm]}
             ip_data = pd.DataFrame(data)
@@ -241,7 +242,29 @@ while True:
                 finalgrpdur = [x for x in grpdur]
                 finalgrpsta = [x for x in grpsta]
                 finalslotspergrp = [x for x in slotspergrp]
-
+    else:
+        grpdur = [beaconinterval]
+        slotspergrp = [1]
+        throughoverall = 0
+        station_norm = ((len(grpsta[0]) - stationMean)/stationMaxmin)
+        beaconinterval_norm = ((grpdur[0] - BeaconIntervalMean)/BeaconIntervalMaxmin)
+        # creating a dataframe inorder to predict the no.of slots from stations,beacon interval and throughput
+        data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'Throughput':[((0.5 - ThroughputMean)/ThroughputMaxmin)]}
+        slots_norm = reg_slots.predict(ip_data)
+        ip_data = pd.DataFrame(data)
+        slotspergrp[0] = min(int((slots_norm * slotsMaxmin) + slotsMean), len(grpsta[i]))
+        if slotspergrp[0] == 0:
+            slotspergrp[0] = 1
+        slots_norm = ((slotspergrp[0] - slotsMean)/slotsMaxmin)
+        # creating a dataframe inorder to predict the throughput from stations,beacon interval and no.of slots
+        data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'No of Slots':[slots_norm]}
+        ip_data = pd.DataFrame(data)
+        th_norm = reg_th.predict(ip_data)
+        throughoverall = (th_norm * ThroughputMaxmin) + ThroughputMean
+        if finalthroughput < throughoverall:
+            finalgrpsta = [x for x in grpsta]
+            finalgrpdur = [x for x in grpdur]
+            finalslotspergrp = [x for x in slotspergrp]
     # running the threads with the updated parameters
     grpsta = [x for x in finalgrpsta]
     grpdur = [x for x in finalgrpdur]
@@ -271,3 +294,16 @@ while True:
             else:
                 # to resume execution of main function after last thread is completed
                 stationthreads.join()
+    else:
+        print("grpsta ", end = '')
+        print(grpsta)
+        print("grpdur ", end = '')
+        print(grpdur)
+        print("slot ", end = '')
+        print(slotspergrp)
+        print("pktrec ", end = '')
+        print(pktrec)
+        print(notimes)
+else:
+    print(pktrec)
+    print(finished)
