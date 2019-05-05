@@ -1,6 +1,8 @@
 import random
 import time
 import threading
+import statistics
+import matplotlib.pyplot as plt
 # Reading the excel file
 import pandas as pd
 df = pd.read_excel('dataset.xlsx')
@@ -30,6 +32,7 @@ reg_th.fit(th_x, th_y)
 
 # Threading function call for each station
 def mac(lock, station_id, slottime):
+    global parallel
     begin = time.time()  # time when thread got started
     global pktrec       #  Packets recieved for each station
     global channel      #  Channel is set as global
@@ -54,39 +57,36 @@ def mac(lock, station_id, slottime):
                 if channel == 0:
                     backOff = backOff - 1
             else:
-                while channel == 1:
-                    if time.time() - begin > slottime:
-                        break
-                    waste = [0 for i in range(1000)]
                 if time.time() - begin > slottime:
                     break
                 lock.acquire()
-                if channel == 0:
-                    channel = 1
-                else:
-                    while channel:
-                        waste = [0 for i in range(1000)]
-                    else:
-                        channel = 1
+                parallel += 1
                 lock.release()
-                if time.time() - begin > slottime:
+                channel = 1
+                for i in range(6000):
+                    if parallel > 1:
+                        channel = 0
+                        lock.acquire()
+                        parallel = 0
+                        lock.release()
+                        break
+                else:
+                    pktrec[station_id] += 1
+                    parallel = 0
                     channel = 0
                     break
-                time.sleep(250 * (10**(-6)))    #  Time for sending the packet
-                if time.time() - begin > slottime:
-                    channel = 0
-                    break
-                pktrec[station_id] += 1
-                channel = 0
 
+parallel = 0
 # Number of Stations
 N = int(input("No of Nodes connected to the server: "))
 # Data Rate
-datarate = float(input("Enter the data rate in Mbps: "))
+# datarate = float(input("Enter the data rate in Mbps: "))
+# data rate is taken as 0.65 Mbps
 # Packet Size
 size = int(input("Enter the packet size in bytes: "))
 # Packet Arrival Rate
-pktrate = int(input("Enter packet arrival rate: "))
+# Saturates traffic scenario is considered
+# pktrate = int(input("Enter packet arrival rate: "))
 # Beacon Interval
 beaconinterval = int(input("Enter Beacon Interval in us: "))
 beaconinterval = float(beaconinterval * (10 ** (-6)))
@@ -97,6 +97,7 @@ channel = 0
 
 # Initialisation
 # No of groups
+print("For Initialisation")
 nogrp = int(input("No of groups to be present: "))
 # Group duration
 grpdur = []
@@ -136,10 +137,13 @@ for i in range(nogrp):
             stationthreads.join()
 
 print(pktrec)
-notimes = 3
+notimes = 0
 
+itr = 100;
+avg = 0;
+fairness = [0 for i in range(100)]
 # carrying out hierarchical clustering
-while notimes > 0:
+while itr > 0:
     # initialisation for first stage of hierarchical clustering
     grpsta = [[i] for i in range(N)]
     mpktrec = [x+1 if x == 0 else x for x in pktrec]
@@ -156,7 +160,7 @@ while notimes > 0:
         slotspergrp[i] = 1
         slots_norm = ((slotspergrp[i] - slotsMean)/slotsMaxmin)
         # creating a dataframe inorder to predict the throughput from no.of stations,beacon interval and no.of slots
-        data = {'No of Stations':[station_norm],'Beacon Interval':[beaconinterval_norm],'No of Slots':[slots_norm]}
+        data = {'No of Stations':[station_norm],'Beacon Inter val':[beaconinterval_norm],'No of Slots':[slots_norm]}
         ip_data = pd.DataFrame(data)
         th_norm = reg_th.predict(ip_data)
         th = (th_norm * ThroughputMaxmin) + ThroughputMean
@@ -283,7 +287,7 @@ while notimes > 0:
             else:
                 pktslot.append(prec)
         else:
-            invpktslot = [float(1/x) for x in pktslot]
+            invpktslot = [1 if x == 0 else float(1/x) for x in pktslot]
             slottime = [float((grpdur[i] * x)/sum(invpktslot)) for x in invpktslot]
         # Iterating in each RAW slot
         for j in range(slotspergrp[i]):
@@ -295,15 +299,27 @@ while notimes > 0:
                 # to resume execution of main function after last thread is completed
                 stationthreads.join()
     else:
-        print("grpsta ", end = '')
+        notimes += 1
+        print(str(notimes) + " time")
+        print("grpsta: ", end = '')
         print(grpsta)
-        print("grpdur ", end = '')
-        print(grpdur)
-        print("slot ", end = '')
-        print(slotspergrp)
         print("pktrec ", end = '')
         print(pktrec)
-        print(notimes)
+        fairness[notimes - 1] = statistics.stdev(pktrec)
+        # print("Estimated Throughput: ", end = '')
+        # print(finalthroughput)
+        print("Observed throughput: ", end = '')
+        print((sum(pktrec) * 256 * 8)/(notimes * 0.65 * 1024 * 1024 * beaconinterval))
+        print('')
+    itr -= 1
+    avg += (sum(pktrec) * 256 * 8)/(notimes * 0.65 * 1024 * 1024 * beaconinterval)
 else:
-    print(pktrec)
-    print(finished)
+    plt.title("Fairness")
+    plt.xlabel("Beacon Intervals")
+    plt.ylabel("Std deviation (packets)")
+    x = [i for i in range(100)]
+    plt.plot(x, fairness)
+    plt.show()
+    print("average throughput: ", end = '')
+    print(avg/itr)
+    print('finished')
